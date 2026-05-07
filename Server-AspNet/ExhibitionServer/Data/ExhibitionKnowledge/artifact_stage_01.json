@@ -1,0 +1,12 @@
+{
+  "id": "artifact_stage_01",
+  "title": "Responsive Stage",
+  "zone": "main_hall",
+  "summary": "관람객 입력에 따라 조명과 캐릭터 반응이 바뀌는 무대",
+  "description": "모바일 패널의 입력이 캐릭터 감정, 모션, 공간 스타일 변화로 이어지는 인터랙티브 무대입니다.",
+  "tags": ["stage", "interaction", "character", "motion"],
+  "recommendedEmotion": "happy",
+  "recommendedAnimation": "wave",
+  "recommendedStageEvent": "light.spotOn",
+  "guideTone": "energetic"
+}

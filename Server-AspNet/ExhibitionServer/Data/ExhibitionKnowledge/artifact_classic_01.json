@@ -1,0 +1,12 @@
+{
+  "id": "artifact_classic_01",
+  "title": "Classic Memory Frame",
+  "zone": "main_hall",
+  "summary": "오래된 무대의 기억을 담은 전시물",
+  "description": "빛바랜 금속 프레임과 따뜻한 조명을 통해 과거 공연장의 분위기를 재해석한 작품입니다.",
+  "tags": ["classic", "aged", "memory", "stage"],
+  "recommendedEmotion": "happy",
+  "recommendedAnimation": "explain",
+  "recommendedStageEvent": "style_classic",
+  "guideTone": "warm"
+}

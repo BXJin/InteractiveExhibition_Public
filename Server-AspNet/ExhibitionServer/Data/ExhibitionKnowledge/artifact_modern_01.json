@@ -1,0 +1,12 @@
+{
+  "id": "artifact_modern_01",
+  "title": "Modern Light Column",
+  "zone": "main_hall",
+  "summary": "간결한 선과 차가운 빛을 사용하는 현대적 전시물",
+  "description": "수직적인 빛 기둥과 절제된 색으로 미래적인 전시 분위기를 만드는 오브젝트입니다.",
+  "tags": ["modern", "clean", "light"],
+  "recommendedEmotion": "surprise",
+  "recommendedAnimation": "explain",
+  "recommendedStageEvent": "style_modern",
+  "guideTone": "clear"
+}
