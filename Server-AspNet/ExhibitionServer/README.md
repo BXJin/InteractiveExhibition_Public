@@ -6,6 +6,18 @@ AI 채팅 RAG 파이프라인을 오케스트레이션합니다.
 
 ---
 
+## 실행
+
+```bash
+dotnet run                          # http://localhost:5225
+dotnet run --launch-profile https   # HTTPS
+```
+
+설정: [`appsettings.json`](appsettings.json) — `AiGateway.BaseUrl` 을 Gateway 주소로 변경  
+배포: [`../../scripts/publish-server.bat`](../../scripts/publish-server.bat)
+
+---
+
 ## 폴더 구조
 
 ```
@@ -30,12 +42,12 @@ ExhibitionServer/
 
 | 클래스 | 역할 | 왜 이 구조인가 |
 |--------|------|---------------|
-| `ExhibitionHub` | SignalR Hub. 패널 연결/해제 이벤트 수신, UE로 명령 브로드캐스트. | SignalR 그룹 관리와 UE 전달을 명확히 분리하기 위해 Hub를 얇게 유지. |
-| `UnrealWebSocketMiddleware` | UE5 클라이언트의 WebSocket 연결 수락 및 메시지 루프 처리. | SignalR과 UE WebSocket이 다른 프로토콜이므로 별도 미들웨어로 분리. |
-| `UnrealConnectionManager` | UE WebSocket 연결 1개를 유지하고 메시지 직렬화/전송 담당. | 다중 UE 연결 확장 시 이 클래스만 수정하면 됨. |
-| `IRawUnrealBroadcaster` | 문자열 JSON을 UE로 전송하는 최소 인터페이스. | ChatGuideService가 Realtime 구현체에 직접 의존하지 않도록 역전. |
+| [`ExhibitionHub.cs`](Realtime/ExhibitionHub.cs) | SignalR Hub. 패널 연결/해제 수신, UE로 명령 브로드캐스트. | Hub는 얇게 유지 — 비즈니스 로직은 Application 계층으로 위임. |
+| [`UnrealWebSocketMiddleware.cs`](Realtime/UnrealWebSocketMiddleware.cs) | UE5 전용 WebSocket 연결 수락 및 메시지 루프. | SignalR과 UE WebSocket이 다른 프로토콜이므로 별도 미들웨어로 분리. |
+| [`UnrealConnectionManager.cs`](Realtime/UnrealConnectionManager.cs) | UE WebSocket 연결 관리, 메시지 직렬화·전송. | 다중 UE 연결 확장 시 이 클래스만 수정하면 됨. |
+| [`IRawUnrealBroadcaster.cs`](Realtime/Abstractions/IRawUnrealBroadcaster.cs) | JSON 문자열을 UE로 전송하는 최소 인터페이스. | ChatGuideService가 Realtime 구현체에 직접 의존하지 않도록 의존성 역전. |
 
-### Application/Chat/ — RAG 파이프라인 핵심
+### Application/Chat/ — RAG 파이프라인
 
 ```
 패널 채팅 메시지
@@ -44,68 +56,64 @@ ExhibitionServer/
 ChatGuideService.HandleAsync()
     │
     ├─ 1. ExhibitionKnowledgeStore  → 키워드 검색으로 관련 전시물 후보 선별
-    │
     ├─ 2. ConversationMemoryStore   → 최근 N턴 대화 히스토리 조회
-    │
-    ├─ 3. AiGatewayClient           → AI Gateway에 RAG 요청 (후보 컨텍스트 포함)
-    │       └─ Gateway가 Embedding Rerank + LLM 호출 후 응답 반환
-    │
-    ├─ 4. CompleteCommands()        → 응답에서 감정·애니메이션 명령 파싱·보완
-    │
-    ├─ 5. CommandDispatcher         → UE로 setEmotion, playAnimation 등 명령 전송
-    │
-    └─ 6. BroadcastChatReplyAsync() → UE HUD에 채팅 텍스트 표시 (chatReply 메시지)
+    ├─ 3. AiGatewayClient           → Gateway에 {메시지 + 컨텍스트 + 히스토리} 전송
+    │       └─ Gateway: Embedding Rerank + LLM 호출 → {reply + suggestedCommands}
+    ├─ 4. CompleteCommands()        → 응답 명령 파싱·보완 (누락된 setEmotion 자동 추가)
+    ├─ 5. CommandDispatcher         → UE로 setEmotion, playAnimation 등 전송
+    └─ 6. BroadcastChatReplyAsync() → UE HUD에 채팅 텍스트 표시
 ```
 
-| 클래스 | 역할 |
+| 클래스 | 파일 |
 |--------|------|
-| `ChatGuideService` | 위 흐름 전체를 오케스트레이션. |
-| `AiGatewayClient` | AI Gateway HTTP 호출. 스트리밍(SSE)과 단건 응답 모두 지원. |
-| `ConversationMemoryStore` | 세션별 대화 히스토리를 메모리에 유지 (최근 N턴). |
-| `ConversationLogger` | 대화 내용 로그 기록. |
+| `ChatGuideService` | [`Application/Chat/ChatGuideService.cs`](Application/Chat/ChatGuideService.cs) |
+| `AiGatewayClient` | [`Application/Chat/AiGatewayClient.cs`](Application/Chat/AiGatewayClient.cs) |
+| `ConversationMemoryStore` | [`Application/Chat/ConversationMemoryStore.cs`](Application/Chat/ConversationMemoryStore.cs) |
+| `ConversationLogger` | [`Application/Chat/ConversationLogger.cs`](Application/Chat/ConversationLogger.cs) |
 
 **왜 OpenAI 키를 이 서버에 두지 않는가**  
-Steam 배포 시 서버 EXE가 사용자 PC에 설치됩니다. API 키가 포함되면 노출 위험이 있어,  
-키는 Azure의 AI Gateway에만 보관하고, 로컬 서버는 키 없이 Gateway URL로만 통신합니다.
+배포 시 서버 EXE가 사용자 PC에 설치됩니다. API 키가 포함되면 노출 위험이 있어  
+키는 Azure AI Gateway에만 보관하고, 로컬 서버는 Gateway URL로만 통신합니다.  
+→ [`DisabledEmbeddingClient.cs`](Application/Knowledge/DisabledEmbeddingClient.cs)
 
 ### Application/Knowledge/
 
-| 클래스 | 역할 |
-|--------|------|
-| `ExhibitionKnowledgeStore` | 전시물 JSON을 시작 시 메모리에 로드. 키워드·태그·별칭 기반 검색. |
-| `InMemoryKnowledgeVectorSearch` | 추후 벡터 검색 확장을 위한 인메모리 스텁. |
-| `DisabledEmbeddingClient` | Embedding 기능 비활성화 구현체. 로컬 서버는 키가 없으므로 항상 이것을 사용. |
+| 클래스 | 파일 | 역할 |
+|--------|------|------|
+| `ExhibitionKnowledgeStore` | [`Application/Knowledge/ExhibitionKnowledgeStore.cs`](Application/Knowledge/ExhibitionKnowledgeStore.cs) | 전시물 JSON을 시작 시 메모리에 로드. 키워드·태그·별칭 검색. |
+| `InMemoryKnowledgeVectorSearch` | [`Application/Knowledge/InMemoryKnowledgeVectorSearch.cs`](Application/Knowledge/InMemoryKnowledgeVectorSearch.cs) | 벡터 검색 확장을 위한 인메모리 스텁. |
+| `DisabledEmbeddingClient` | [`Application/Knowledge/DisabledEmbeddingClient.cs`](Application/Knowledge/DisabledEmbeddingClient.cs) | Embedding 비활성화 구현체. 로컬 서버에서 항상 사용. |
 
 ### Controllers/
 
-| 클래스 | 역할 |
-|--------|------|
-| `ChatController` | `POST /api/chat` — 채팅 요청 수신, SSE 스트리밍 응답 반환. |
-| `CommandsController` | `POST /api/commands` — 직접 명령 전송 (테스트/디버그용). |
-| `PanelAccessController` | 패널 접속 URL, QR 코드 관련 정보 제공. |
+| 클래스 | 파일 | 역할 |
+|--------|------|------|
+| `ChatController` | [`Controllers/ChatController.cs`](Controllers/ChatController.cs) | `POST /api/chat` — 채팅 수신, SSE 스트리밍 응답. |
+| `CommandsController` | [`Controllers/CommandsController.cs`](Controllers/CommandsController.cs) | `POST /api/commands` — 직접 명령 전송 (디버그용). |
+| `PanelAccessController` | [`Controllers/PanelAccessController.cs`](Controllers/PanelAccessController.cs) | 패널 접속 URL·QR 정보 제공. |
 
 ---
 
-## 미들웨어 파이프라인 순서
+## 미들웨어 파이프라인
 
-`Configuration/MiddlewareExtensions.cs` 참고:
+[`Configuration/MiddlewareExtensions.cs`](Configuration/MiddlewareExtensions.cs) 참고:
 
 ```
 1. Swagger (개발 환경)
-2. UseDefaultFiles + UseStaticFiles  ← 모바일 패널 정적 서빙
+2. UseDefaultFiles + UseStaticFiles  ← 모바일 패널 정적 서빙 (wwwroot/)
 3. UseCors
 4. UseAuthorization
 5. UseWebSockets
-6. UseUnrealWebSocket               ← UE WebSocket 연결 처리
-7. MapControllers + MapHub          ← REST API + SignalR
+6. UseUnrealWebSocket               ← UE WebSocket 연결
+7. MapControllers + MapHub          ← REST API + SignalR Hub
 ```
 
 ---
 
 ## 전시물 데이터
 
-`Data/ExhibitionKnowledge/*.json` — 전시물 1개 = JSON 파일 1개.  
-서버 시작 시 전부 로드되며, `dotnet publish` 시 자동으로 출력 폴더에 포함됩니다.
+[`Data/ExhibitionKnowledge/`](Data/ExhibitionKnowledge/) — 전시물 1개 = JSON 파일 1개.  
+`dotnet publish` 시 자동으로 출력 폴더에 포함됩니다 (`.csproj`에 `CopyToPublishDirectory` 설정).
 
 ```json
 {
@@ -117,3 +125,13 @@ Steam 배포 시 서버 EXE가 사용자 PC에 설치됩니다. API 키가 포�
   "aliases": ["Triceratops", "뿔공룡"]
 }
 ```
+
+---
+
+## 기술 선택 이유
+
+| 결정 | 이유 |
+|------|------|
+| SignalR (패널용) + 별도 WebSocket (UE용) | UE는 SignalR 클라이언트 라이브러리가 없음. 패널은 자동 재연결이 필요해 SignalR이 적합. |
+| 키워드 검색 로컬 + Embedding Rerank Gateway | API 키 없이도 후보 선별 가능. 정밀 rerank는 키 있는 Gateway에서만 수행. |
+| `GameInstanceSubsystem` 패턴 (UE측) | 씬 전환과 무관하게 WebSocket 연결 유지 필요. |
