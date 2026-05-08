@@ -2,6 +2,7 @@
 
 **Azure App Service에 배포되는 AI 프록시 서버**.  
 로컬 ExhibitionServer로부터 RAG 요청을 받아 Embedding Rerank 후 LLM을 호출하고 응답을 반환합니다.  
+음성 채팅 파이프라인을 위한 STT(Whisper) / TTS(gpt-4o-mini-tts) 엔드포인트도 제공합니다.  
 OpenAI API 키는 이 서버의 환경변수에만 존재합니다.
 
 ---
@@ -35,14 +36,20 @@ GatewaySecurity__ApiKey = <접근 제한 키>
 ```
 ExhibitionAiGateway/
 ├── Controllers/            # HTTP 엔드포인트
+│   ├── AiChatController.cs
+│   └── AiVoiceController.cs
 ├── Application/
-│   ├── Abstractions/       # 인터페이스 정의
+│   ├── Abstractions/       # 인터페이스 정의 (IAiChatProvider, ISttProvider, ITtsProvider 등)
 │   ├── Rag/                # Embedding Rerank
 │   ├── AiChatService.cs    # 단건 응답 오케스트레이션
 │   └── AiChatStreamService.cs # 스트리밍 응답 오케스트레이션
-├── Providers/OpenAI/       # OpenAI Responses API 구현체
+├── Providers/OpenAI/       # OpenAI 구현체
+│   ├── OpenAiResponsesProvider.cs  # Chat (Responses API)
+│   ├── OpenAiSttProvider.cs        # STT (Whisper)
+│   ├── OpenAiTtsProvider.cs        # TTS (gpt-4o-mini-tts)
+│   └── ReplyStreamExtractor.cs
 ├── Security/               # API 키 인증 미들웨어
-├── Options/                # appsettings 바인딩
+├── Options/                # appsettings 바인딩 (VoiceOptions 포함)
 └── Streaming/              # SSE 유틸
 ```
 
@@ -67,6 +74,17 @@ AiChatController
     │             └─ ReplyStreamExtractor     ← delta → JSON 추출
     │
     └─ 단건   → AiChatService → OpenAiResponsesProvider
+
+ExhibitionServer (로컬)
+    │  POST /ai/voice/transcribe  (multipart audio)
+    │  POST /ai/voice/synthesize  {text, voice, instructions}
+    ▼
+AiGatewayAuthenticationMiddleware
+    │
+    ▼
+AiVoiceController
+    ├─ /transcribe → OpenAiSttProvider  ← Whisper API → transcript 텍스트
+    └─ /synthesize → OpenAiTtsProvider  ← gpt-4o-mini-tts → WAV 바이트 스트림
 ```
 
 ### Application/
@@ -90,6 +108,15 @@ AiChatController
 |--------|------|------|
 | `OpenAiResponsesProvider` | [`Providers/OpenAI/OpenAiResponsesProvider.cs`](Providers/OpenAI/OpenAiResponsesProvider.cs) | OpenAI Responses API 호출. 프롬프트 구성, 스트리밍 파싱, JSON 역직렬화. |
 | `ReplyStreamExtractor` | [`Providers/OpenAI/ReplyStreamExtractor.cs`](Providers/OpenAI/ReplyStreamExtractor.cs) | SSE delta 청크를 누적해 `reply + suggestedCommands` JSON 추출. |
+| `OpenAiSttProvider` | [`Providers/OpenAI/OpenAiSttProvider.cs`](Providers/OpenAI/OpenAiSttProvider.cs) | Whisper API 호출. multipart/form-data로 오디오 업로드 → 텍스트 반환. |
+| `OpenAiTtsProvider` | [`Providers/OpenAI/OpenAiTtsProvider.cs`](Providers/OpenAI/OpenAiTtsProvider.cs) | gpt-4o-mini-tts 호출. 텍스트 → WAV 스트림 반환. `VoiceOptions`에서 목소리·지시문 설정. |
+
+### Controllers/
+
+| 클래스 | 파일 | 역할 |
+|--------|------|------|
+| `AiChatController` | [`Controllers/AiChatController.cs`](Controllers/AiChatController.cs) | `POST /ai/chat` — 채팅 수신, SSE 스트리밍 응답. |
+| `AiVoiceController` | [`Controllers/AiVoiceController.cs`](Controllers/AiVoiceController.cs) | `POST /ai/voice/transcribe` — STT(Whisper). `POST /ai/voice/synthesize` — TTS(gpt-4o-mini-tts). |
 
 ### Security/
 
@@ -117,6 +144,22 @@ AiChatController
 
 ---
 
+## VoiceOptions 설정 (`appsettings.json`)
+
+```json
+"Voice": {
+  "SttModel": "whisper-1",
+  "TtsModel": "gpt-4o-mini-tts",
+  "DefaultVoice": "alloy",
+  "TtsInstructions": "한국어로 또렷하고 명확하게 발음해. 단어를 늘이거나 감정을 과장하지 마.",
+  "TtsResponseFormat": "wav"
+}
+```
+
+목소리 변경: `DefaultVoice` 값을 `alloy / echo / fable / onyx / nova / shimmer` 중 하나로 교체.
+
+---
+
 ## 기술 선택 이유
 
 | 결정 | 이유 |
@@ -124,3 +167,4 @@ AiChatController
 | Responses API (Chat Completions 대신) | `output_text` 필드로 텍스트 추출이 단순하고, 스트리밍 이벤트 타입이 명확해 파싱 안정성이 높음. |
 | 로컬 키워드 검색 + Gateway Embedding Rerank | 로컬 서버에 키 없이도 동작하면서 의미 기반 정밀도를 확보하는 절충안. |
 | Provider 패턴 | 프롬프트와 API 호출을 구현체에 가두고, 설정값만 바꿔 LLM을 교체할 수 있게 설계. |
+| STT/TTS를 Gateway에 위임 | API 키 보안 원칙 동일 — 로컬 서버는 키 없이 오디오 바이트만 전달. |

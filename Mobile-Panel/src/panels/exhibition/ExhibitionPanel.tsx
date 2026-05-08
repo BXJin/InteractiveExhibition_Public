@@ -11,15 +11,18 @@ import {
   Joystick,
   TouchPad,
   ActionButton,
+  MicButton,
   ControllerShell,
   StatusBar,
   SideMenu,
   useTransport,
   useConnectionState,
   useThrottle,
+  useVoiceRecorder,
 } from '../../core';
 import type { ConnectionStatus } from '../../core';
 import type { SendResult } from '../../core/transport/types';
+import { TtsQueuePlayer } from '../../core/audio/TtsQueuePlayer';
 import { ExhibitionCommands } from './commands';
 import {
   resolveChatTransportMode,
@@ -27,6 +30,7 @@ import {
   sendGuideChatStream,
 } from './chatApi';
 import type { ChatResponse, ChatTransportMode } from './chatApi';
+import { streamVoiceChat, notifySpeakingComplete } from './voiceApi';
 
 // ─────────────────────────────────────
 // Constants
@@ -34,6 +38,7 @@ import type { ChatResponse, ChatTransportMode } from './chatApi';
 
 const STORAGE_KEY    = 'exhibition_server_url';
 const CHAT_CONVERSATION_KEY = 'exhibition_chat_conversation_id';
+const CHARACTER_ID   = 'Character_01';
 const DEFAULT_URL    = `${window.location.protocol}//${window.location.hostname}:5225`;
 const THROTTLE_MS    = 80;  // 조이스틱/터치패드 전송 간격
 const FEEDBACK_MS    = 1500; // 버튼 피드백 표시 시간
@@ -164,9 +169,15 @@ export const ExhibitionPanel: React.FC = () => {
   const [serverUrl, setServerUrl] = useState(getStoredUrl);
   const [urlDraft, setUrlDraft] = useState(serverUrl);
 
+  const [voiceBusy, setVoiceBusy] = useState(false);
+
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const conversationIdRef = useRef(getConversationId());
+  const ttsPlayerRef = useRef<TtsQueuePlayer | null>(null);
+  const voiceAbortRef = useRef<AbortController | null>(null);
   useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
+
+  const { isRecording, start: startRecording, stop: stopRecording, permissionDenied } = useVoiceRecorder();
 
   // ── Settings ──
   const saveUrl = () => {
@@ -342,6 +353,75 @@ export const ExhibitionPanel: React.FC = () => {
     }
   }, [chatBusy, chatInput, chatTransportMode, serverUrl]);
 
+  const submitVoiceChat = useCallback(async (blob: Blob) => {
+    if (voiceBusy || chatBusy) return;
+
+    // 진행 중인 TTS·스트림 중단
+    ttsPlayerRef.current?.stop();
+    voiceAbortRef.current?.abort();
+
+    const abortController = new AbortController();
+    voiceAbortRef.current = abortController;
+    setVoiceBusy(true);
+
+    const assistantId = `voice-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    let userMessageAdded = false;
+
+    const player = new TtsQueuePlayer(serverUrl);
+    ttsPlayerRef.current = player;
+
+    player.onComplete = () => {
+      notifySpeakingComplete(serverUrl, CHARACTER_ID).catch(() => {});
+      setVoiceBusy(false);
+    };
+
+    await streamVoiceChat(
+      serverUrl,
+      blob,
+      conversationIdRef.current,
+      CHARACTER_ID,
+      {
+        onAck: (audioUrl, _text) => {
+          if (audioUrl) player.enqueue(audioUrl);
+        },
+        onTranscript: (text) => {
+          userMessageAdded = true;
+          setChatMessages(prev => [
+            ...prev,
+            { role: 'user', text },
+            { id: assistantId, role: 'assistant', text: '', mode: 'stream', streaming: true },
+          ]);
+        },
+        onTextChunk: (text) => {
+          setChatMessages(prev => prev.map(item =>
+            item.id === assistantId ? { ...item, text: item.text + text } : item,
+          ));
+        },
+        onTtsChunk: (audioUrl, _text) => {
+          player.enqueue(audioUrl);
+        },
+        onDone: () => {
+          setChatMessages(prev => prev.map(item =>
+            item.id === assistantId ? { ...item, streaming: false } : item,
+          ));
+          // TTS 청크가 없었으면 즉시 완료 처리
+          player.finalize();
+        },
+        onError: (_errorCode, message) => {
+          if (userMessageAdded) {
+            setChatMessages(prev => prev.map(item =>
+              item.id === assistantId ? { ...item, text: message, streaming: false } : item,
+            ));
+          } else {
+            setChatMessages(prev => [...prev, { role: 'assistant', text: message }]);
+          }
+          setVoiceBusy(false);
+        },
+      },
+      abortController.signal,
+    );
+  }, [voiceBusy, chatBusy, serverUrl]);
+
   // ─────────────────────────────────────
   // Render
   // ─────────────────────────────────────
@@ -402,8 +482,8 @@ export const ExhibitionPanel: React.FC = () => {
     >
       {/* TouchPad: 메인 영역 전체가 드래그 회전 표면 */}
       <button
-        onClick={() => setChatOpen(v => !v)}
-        className={`absolute top-4 left-4 z-30 h-11 w-11 rounded-xl border flex items-center justify-center transition-colors
+        onClick={() => { setChatOpen(v => !v); setSideOpen(false); }}
+        className={`absolute bottom-10 right-8 z-30 h-11 w-11 rounded-xl border flex items-center justify-center transition-colors
           ${chatOpen ? 'bg-emerald-500/20 border-emerald-400/30 text-emerald-300' : 'bg-white/5 border-white/10 text-white/40 active:text-white'}`}
         aria-label="Open guide chat"
       >
@@ -413,11 +493,11 @@ export const ExhibitionPanel: React.FC = () => {
       <AnimatePresence>
         {chatOpen && (
           <motion.div
-            initial={{ x: '-105%', opacity: 0 }}
+            initial={{ x: '105%', opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
-            exit={{ x: '-105%', opacity: 0 }}
+            exit={{ x: '105%', opacity: 0 }}
             transition={{ type: 'spring', stiffness: 360, damping: 34 }}
-            className="absolute top-0 bottom-0 left-0 z-20 w-[min(340px,88vw)] bg-[#0d0d0d]/98 backdrop-blur-md border-r border-white/8 flex flex-col pt-16 touch-auto"
+            className="absolute top-0 bottom-0 right-0 z-20 w-[min(340px,88vw)] bg-[#0d0d0d]/98 backdrop-blur-md border-l border-white/8 flex flex-col pt-16 touch-auto"
             onTouchStart={e => e.stopPropagation()}
             onTouchMove={e => e.stopPropagation()}
             onTouchEnd={e => e.stopPropagation()}
@@ -509,14 +589,24 @@ export const ExhibitionPanel: React.FC = () => {
                 <input
                   value={chatInput}
                   onChange={e => setChatInput(e.target.value)}
-                  disabled={chatBusy}
+                  disabled={chatBusy || voiceBusy}
                   maxLength={300}
                   placeholder="전시물이나 분위기를 물어봐"
                   className="min-w-0 flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-[12px] text-white/80 outline-none focus:border-emerald-500/40 disabled:opacity-40"
                 />
+                <MicButton
+                  isRecording={isRecording}
+                  disabled={chatBusy || voiceBusy}
+                  permissionDenied={permissionDenied}
+                  onPressStart={startRecording}
+                  onPressEnd={async () => {
+                    const blob = await stopRecording();
+                    if (blob && blob.size > 0) void submitVoiceChat(blob);
+                  }}
+                />
                 <button
                   type="submit"
-                  disabled={chatBusy || !chatInput.trim()}
+                  disabled={chatBusy || voiceBusy || !chatInput.trim()}
                   className="h-9 w-9 shrink-0 rounded-lg bg-emerald-600 disabled:bg-white/10 disabled:text-white/20 flex items-center justify-center"
                 >
                   <Send size={14} />
@@ -557,7 +647,7 @@ export const ExhibitionPanel: React.FC = () => {
       </div>
 
       {/* Side Menu */}
-      <SideMenu open={sideOpen} onToggle={() => setSideOpen(v => !v)}>
+      <SideMenu open={sideOpen} onToggle={() => { setSideOpen(v => !v); setChatOpen(false); }}>
         <div className="p-4 space-y-5">
 
           <Section title="Emotion">

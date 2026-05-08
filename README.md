@@ -10,23 +10,24 @@
 ┌─────────────────────────────────────────────────────────────────┐
 │  관람객 (폰/태블릿)                                              │
 │  Mobile Panel (React PWA)                                        │
-│    조이스틱 조종 / 카메라 회전 / AI 채팅                         │
+│    조이스틱 조종 / 카메라 회전 / AI 채팅 / 음성 채팅(Push-to-Talk)│
 └────────────────────┬────────────────────────────────────────────┘
-                     │ SignalR (WebSocket)
+                     │ SignalR (WebSocket) + HTTP/SSE
 ┌────────────────────▼────────────────────────────────────────────┐
 │  로컬 서버 (전시 PC)                                             │
 │  ASP.NET Core — ExhibitionServer                                 │
 │    SignalR Hub  │  WebSocket(UE용)  │  채팅 RAG 파이프라인       │
 │    키워드 검색(전시물 JSON) → 후보 컨텍스트 선별                  │
+│    음성 파이프라인: STT→RAG→LLM→TTS (문장 단위 스트리밍)         │
 └──────┬─────────────────────────────┬──────────────────────────── ┘
-       │ WebSocket                   │ HTTPS (RAG + LLM 위임)
+       │ WebSocket                   │ HTTPS (RAG + LLM + STT/TTS 위임)
 ┌──────▼──────────────┐   ┌──────────▼──────────────────────────── ┐
 │  UE5 클라이언트     │   │  Azure — ExhibitionAiGateway            │
 │  ExhibitionClient   │   │    Embedding Rerank (OpenAI)            │
 │    캐릭터 애니메이션 │   │    LLM 호출 (OpenAI gpt-4o-mini)        │
-│    감정 표현        │   │    API 키는 이곳에만 존재               │
-│    HUD 채팅 표시    │   └─────────────────────────────────────────┘
-└─────────────────────┘
+│    감정 표현        │   │    STT (Whisper) / TTS (gpt-4o-mini-tts) │
+│    HUD 채팅 표시    │   │    API 키는 이곳에만 존재               │
+└─────────────────────┘   └─────────────────────────────────────────┘
 ```
 
 ---
@@ -65,6 +66,22 @@
 | Embedding Rerank (Gateway측) | [EmbeddingRetrievedContextRanker.cs](Cloud-AI-Gateway/ExhibitionAiGateway/Application/Rag/EmbeddingRetrievedContextRanker.cs) |
 | OpenAI 프롬프트 + 스트리밍 | [OpenAiResponsesProvider.cs](Cloud-AI-Gateway/ExhibitionAiGateway/Providers/OpenAI/OpenAiResponsesProvider.cs) |
 | 대화 히스토리 관리 | [ConversationMemoryStore.cs](Server-AspNet/ExhibitionServer/Application/Chat/ConversationMemoryStore.cs) |
+
+### 음성 채팅 파이프라인 (STT → LLM → TTS)
+
+| 기능 | 파일 |
+|------|------|
+| 음성 파이프라인 오케스트레이터 | [VoiceChatService.cs](Server-AspNet/ExhibitionServer/Application/Voice/VoiceChatService.cs) |
+| 문장 단위 TTS 트리거 버퍼 | [SentenceBuffer.cs](Server-AspNet/ExhibitionServer/Application/Voice/SentenceBuffer.cs) |
+| TTS 오디오 임시 저장 (TTL 10분) | [TtsAudioStore.cs](Server-AspNet/ExhibitionServer/Application/Voice/TtsAudioStore.cs) |
+| 즉각 응답(Fast Ack) 서비스 | [FastAckService.cs](Server-AspNet/ExhibitionServer/Application/Voice/FastAckService.cs) |
+| Gateway STT/TTS HTTP 클라이언트 | [AiGatewayVoiceClient.cs](Server-AspNet/ExhibitionServer/Application/Chat/AiGatewayVoiceClient.cs) |
+| STT 구현체 (Whisper) | [OpenAiSttProvider.cs](Cloud-AI-Gateway/ExhibitionAiGateway/Providers/OpenAI/OpenAiSttProvider.cs) |
+| TTS 구현체 (gpt-4o-mini-tts) | [OpenAiTtsProvider.cs](Cloud-AI-Gateway/ExhibitionAiGateway/Providers/OpenAI/OpenAiTtsProvider.cs) |
+| 클라이언트 TTS 큐 플레이어 (프리패치) | [TtsQueuePlayer.ts](Mobile-Panel/src/core/audio/TtsQueuePlayer.ts) |
+| 음성 SSE 파이프라인 (클라이언트) | [voiceApi.ts](Mobile-Panel/src/panels/exhibition/voiceApi.ts) |
+| Push-to-Talk 마이크 버튼 | [MicButton.tsx](Mobile-Panel/src/core/input/MicButton.tsx) |
+| 음성 녹음 훅 | [useVoiceRecorder.ts](Mobile-Panel/src/core/hooks/useVoiceRecorder.ts) |
 
 ### 모바일 패널 입력
 

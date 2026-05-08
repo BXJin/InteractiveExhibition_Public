@@ -183,7 +183,11 @@ public sealed class ChatGuideService : IChatGuideService
                     request.CharacterId,
                     sources);
 
-                var executedIds = await DispatchCommandsAsync(commands, cancellationToken);
+                var dispatchTargets = request.VoiceMode
+                    ? commands.Where(c => c is not PlayAnimationCommand).ToArray()
+                    : commands;
+
+                var executedIds = await DispatchCommandsAsync(dispatchTargets, cancellationToken);
                 await BroadcastChatReplyAsync(streamEvent.CompleteResponse.Reply, cancellationToken);
                 stopwatch.Stop();
 
@@ -230,7 +234,11 @@ public sealed class ChatGuideService : IChatGuideService
                 sources);
             var fallbackReply = BuildRuleReply(message, sources, fallbackCommands);
 
-            var executedIds = await DispatchCommandsAsync(fallbackCommands, cancellationToken);
+            var fallbackDispatchTargets = request.VoiceMode
+                ? fallbackCommands.Where(c => c is not PlayAnimationCommand).ToArray()
+                : fallbackCommands;
+
+            var executedIds = await DispatchCommandsAsync(fallbackDispatchTargets, cancellationToken);
             await BroadcastChatReplyAsync(fallbackReply, cancellationToken);
             stopwatch.Stop();
 

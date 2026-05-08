@@ -2,7 +2,7 @@
 
 전시 PC에서 실행되는 **로컬 서버**.  
 모바일 패널(SignalR) ↔ UE5 클라이언트(WebSocket) 간 중계 역할을 하며,  
-AI 채팅 RAG 파이프라인을 오케스트레이션합니다.
+AI 채팅 RAG 파이프라인과 음성 채팅(STT→LLM→TTS) 파이프라인을 오케스트레이션합니다.
 
 ---
 
@@ -25,6 +25,7 @@ ExhibitionServer/
 ├── Realtime/               # SignalR Hub, UE WebSocket 미들웨어·연결 관리
 ├── Application/
 │   ├── Chat/               # 채팅 RAG 파이프라인 (핵심)
+│   ├── Voice/              # 음성 채팅 파이프라인 (STT→LLM→TTS)
 │   ├── Knowledge/          # 전시물 지식베이스 (키워드 검색)
 │   └── Abstractions/       # 인터페이스 정의
 ├── Controllers/            # REST API 엔드포인트
@@ -84,11 +85,50 @@ ChatGuideService.HandleAsync()
 | `InMemoryKnowledgeVectorSearch` | [`Application/Knowledge/InMemoryKnowledgeVectorSearch.cs`](Application/Knowledge/InMemoryKnowledgeVectorSearch.cs) | 벡터 검색 확장을 위한 인메모리 스텁. |
 | `DisabledEmbeddingClient` | [`Application/Knowledge/DisabledEmbeddingClient.cs`](Application/Knowledge/DisabledEmbeddingClient.cs) | Embedding 비활성화 구현체. 로컬 서버에서 항상 사용. |
 
+### Application/Voice/ — 음성 채팅 파이프라인
+
+```
+패널 음성 입력 (Blob)
+    │  POST /api/voice/chat
+    ▼
+VoiceChatService.StreamAsync()   ← IAsyncEnumerable<VoiceStreamEvent> SSE
+    │
+    ├─ 1. AiGatewayVoiceClient.TranscribeAsync()  → Gateway STT (Whisper)
+    ├─ 2. FastAckService.Select()                 → 캐시 wav 즉시 반환 (latency masking)
+    ├─ 3. ChatGuideService.StreamAsync()           → RAG + LLM 스트리밍
+    │       └─ SentenceBuffer                     → 문장 완성 시 TTS 호출
+    │            └─ AiGatewayVoiceClient.TtsAsync() → Gateway TTS
+    │                 └─ TtsAudioStore.Store()    → /api/voice/audio/{id} URL 발급
+    └─ 4. SendPlayAnimationAsync()                → UE에 explain 애니메이션 제어
+         (loop:true=TTS시작 / loop:false=재생완료)
+```
+
+**저지연 기법:**
+- **Fast Ack**: STT 완료 즉시 캐시 오디오 재생 — LLM 대기 시간 차폐
+- **문장 단위 TTS 스트리밍**: 전체 응답 완성 전에 첫 문장 TTS 재생 시작
+- **VoiceMode 플래그**: `ChatRequest.VoiceMode=true`이면 ChatGuideService가 `PlayAnimationCommand` dispatch 스킵 (애니메이션 타이밍을 VoiceChatService가 독점 제어)
+
+| 클래스 | 파일 | 역할 |
+|--------|------|------|
+| `VoiceChatService` | [`Application/Voice/VoiceChatService.cs`](Application/Voice/VoiceChatService.cs) | 파이프라인 오케스트레이터. |
+| `SentenceBuffer` | [`Application/Voice/SentenceBuffer.cs`](Application/Voice/SentenceBuffer.cs) | LLM delta 누적 → 문장 경계 감지. |
+| `TtsAudioStore` | [`Application/Voice/TtsAudioStore.cs`](Application/Voice/TtsAudioStore.cs) | TTS 오디오 인메모리 임시 저장. TTL 10분. |
+| `FastAckService` | [`Application/Voice/FastAckService.cs`](Application/Voice/FastAckService.cs) | transcript 분류 → 캐시 wav 즉시 반환. |
+| `VoiceStreamEvent` | [`Application/Voice/VoiceStreamEvent.cs`](Application/Voice/VoiceStreamEvent.cs) | SSE 이벤트 타입 정의 (ack/transcript/text_chunk/tts_chunk/done/error). |
+| `AiGatewayVoiceClient` | [`Application/Chat/AiGatewayVoiceClient.cs`](Application/Chat/AiGatewayVoiceClient.cs) | Gateway STT/TTS HTTP 클라이언트. |
+
+**Fast Ack 캐시 파일 생성:**
+```bash
+cd Data/TtsCache
+node generate_ack.js   # OPENAI_API_KEY 환경변수 필요
+```
+
 ### Controllers/
 
 | 클래스 | 파일 | 역할 |
 |--------|------|------|
 | `ChatController` | [`Controllers/ChatController.cs`](Controllers/ChatController.cs) | `POST /api/chat` — 채팅 수신, SSE 스트리밍 응답. |
+| `VoiceChatController` | [`Controllers/VoiceChatController.cs`](Controllers/VoiceChatController.cs) | `POST /api/voice/chat` — 음성 수신, SSE 스트리밍. `GET /api/voice/audio/{id}` — TTS wav 제공. `POST /api/voice/speaking-complete` — 재생 완료 알림. |
 | `CommandsController` | [`Controllers/CommandsController.cs`](Controllers/CommandsController.cs) | `POST /api/commands` — 직접 명령 전송 (디버그용). |
 | `PanelAccessController` | [`Controllers/PanelAccessController.cs`](Controllers/PanelAccessController.cs) | 패널 접속 URL·QR 정보 제공. |
 
