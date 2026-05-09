@@ -134,13 +134,20 @@ AiVoiceController
 {
   "reply": "한국어 안내 응답",
   "suggestedCommands": [
-    { "type": "setEmotion", "characterId": "Character_01", "emotion": "explaining" },
+    { "type": "setEmotion", "characterId": "Character_01", "emotion": "curious" },
     { "type": "playAnimation", "characterId": "Character_01", "animation": "explain" }
   ]
 }
 ```
 
-파싱 실패 시 raw 텍스트를 `reply`로 fallback 처리합니다.
+**감정 선택 기준**: 사용자 질문의 키워드가 아닌 AI 답변의 톤에 따라 결정됩니다.  
+인사 → `greeting`, 사실 질문 → `curious`, 역사/분석 → `thinking`, 놀라운 사실 → `surprise`, 구조적 소개 → `explaining` 등.  
+`setEmotion`은 응답마다 반드시 1개 포함하도록 프롬프트에 명시되어 있습니다.
+
+**파싱 전략 (3단계 fallback)**:
+1. `JsonSerializer.Deserialize` — 정상 파싱
+2. `JsonDocument`로 `reply` 필드만 추출 — `suggestedCommands` 파싱 실패 시
+3. 빈 `reply` 반환 — SSE 스트리밍 delta가 이미 텍스트를 전달했으므로 덮어쓰지 않음
 
 ---
 

@@ -159,6 +159,7 @@ public sealed class ChatGuideService : IChatGuideService
         var sources = SelectSources(message, request.SelectedArtifactId);
         var conversationHistory = _conversationMemoryStore.GetRecentTurns(request.ConversationId);
         var completed = false;
+        var deltaAccumulator = new System.Text.StringBuilder();
 
         await foreach (var streamEvent in _aiGatewayClient.StreamReplyAsync(
             request with { Message = message },
@@ -168,6 +169,8 @@ public sealed class ChatGuideService : IChatGuideService
         {
             if (streamEvent.EventType == AiChatStreamEventTypes.Delta)
             {
+                if (!string.IsNullOrEmpty(streamEvent.Text))
+                    deltaAccumulator.Append(streamEvent.Text);
                 yield return streamEvent;
                 continue;
             }
@@ -188,7 +191,11 @@ public sealed class ChatGuideService : IChatGuideService
                     : commands;
 
                 var executedIds = await DispatchCommandsAsync(dispatchTargets, cancellationToken);
-                await BroadcastChatReplyAsync(streamEvent.CompleteResponse.Reply, cancellationToken);
+                // Reply가 비면(파싱 실패 fallback) delta 누적 텍스트로 대신 전송
+                var broadcastReply = string.IsNullOrWhiteSpace(streamEvent.CompleteResponse.Reply)
+                    ? deltaAccumulator.ToString()
+                    : streamEvent.CompleteResponse.Reply;
+                await BroadcastChatReplyAsync(broadcastReply, cancellationToken);
                 stopwatch.Stop();
 
                 _conversationMemoryStore.AppendExchange(
@@ -477,7 +484,9 @@ public sealed class ChatGuideService : IChatGuideService
         var lower = message.ToLowerInvariant();
         if (ContainsAny(lower, "안녕", "반가", "처음", "hello", "hi")) return "greeting";
         if (IsSceneControlQuestion(message))                              return "neutral";
-        return "explaining";
+        if (ContainsAny(lower, "어떻게", "왜", "언제", "어디", "얼마", "뭐야", "뭐지", "what", "how", "why", "when")) return "curious";
+        if (ContainsAny(lower, "역사", "시대", "분석", "비교", "의미", "배경", "history", "analyze", "compare")) return "thinking";
+        return "curious";
     }
 
     private static IEnumerable<ExhibitionCommand> BuildDeterministicCommands(

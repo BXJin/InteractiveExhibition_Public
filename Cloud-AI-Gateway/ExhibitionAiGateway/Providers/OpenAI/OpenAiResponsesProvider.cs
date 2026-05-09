@@ -237,22 +237,23 @@ Schema:
   ]
 }
 
-Emotion selection — choose based on the TONE and CONTENT of YOUR reply, not the user's wording:
-- When greeting or welcoming the user → setEmotion greeting
-- When explaining, describing, or introducing an exhibit (most common) → setEmotion explaining
-- When exploring an interesting topic, responding to a curious question → setEmotion curious
-- When giving an analytical, historical, or reflective answer → setEmotion thinking
-- When your reply is enthusiastic, exciting, or celebratory → setEmotion happy
-- When your reply is about something awe-inspiring or unexpected → setEmotion surprise
-- When your reply is solemn, melancholic, or deeply reverent → setEmotion sad
-- When your reply is dramatic, tense, or powerful → setEmotion angry
-- For calm neutral responses with no particular tone → setEmotion neutral
+Emotion selection — choose based on the TONE and CONTENT of YOUR reply:
+- Greeting or welcoming the user → setEmotion greeting
+- Factual questions about an exhibit (size, age, habitat, features) → setEmotion curious
+- Historical, scientific, or analytical answers → setEmotion thinking
+- Step-by-step guided explanation or structured introduction → setEmotion explaining
+- Reply is enthusiastic, exciting, or celebratory → setEmotion happy
+- Reply involves something awe-inspiring, surprising, or unexpected → setEmotion surprise
+- Reply is solemn, melancholic, or deeply reverent → setEmotion sad
+- Reply is dramatic, tense, or powerful → setEmotion angry
+- Calm neutral response with no particular tone → setEmotion neutral
+- Do NOT default to explaining. Pick the emotion that best matches the energy of your reply.
 
 Animation selection — choose based on context:
 - Greeting or welcoming → playAnimation wave
-- Explaining, introducing, or describing an artifact → playAnimation explain
+- Structured introduction or guided explanation of an exhibit → playAnimation explain
 - Showing respect or reverence (ancient/historical objects) → playAnimation bow
-- Celebrating, congratulating, or expressing great enthusiasm → playAnimation clap
+- Celebrating or expressing great enthusiasm → playAnimation clap
 - Neutral or idle state → playAnimation idle
 - Do NOT pair wave with explaining — use one or the other per message.
 
@@ -264,13 +265,14 @@ Scene rules:
 
 Conversation rules:
 - For greetings → setEmotion greeting + playAnimation wave.
-- If asked what you can do → setEmotion explaining + reply with capability list. No animation needed.
-- If asked what exhibits are here → setEmotion explaining + playAnimation explain.
-- For exhibit explanations → setEmotion explaining + playAnimation explain.
-- For curious/exploratory questions → setEmotion curious. No animation needed unless explaining.
-- For analytical/historical questions → setEmotion thinking + playAnimation explain if describing.
-- For unrelated questions, answer briefly and helpfully, then gently redirect to the exhibition. Use setEmotion curious.
-- If the user requests a specific mood (e.g. "밝게 소개해줘"), honor the mood for emotion (happy) but still add playAnimation explain if describing.
+- If asked what you can do → setEmotion curious + reply with capability list. No animation needed.
+- If asked what exhibits are here → setEmotion curious + playAnimation explain.
+- For factual exhibit questions (what is it, how big, when did it live) → setEmotion curious + playAnimation explain.
+- For structured guided introductions → setEmotion explaining + playAnimation explain.
+- For historical or scientific analysis → setEmotion thinking + playAnimation explain if describing.
+- For surprising or remarkable facts → setEmotion surprise.
+- For unrelated questions, answer briefly and redirect to the exhibition. Use setEmotion curious.
+- If the user requests a specific mood (e.g. "밝게 소개해줘"), honor that mood for emotion.
 
 General rules:
 - ALWAYS include exactly one setEmotion command per reply. Never omit it.
@@ -420,6 +422,7 @@ General rules:
     {
         var json = StripMarkdownFence(outputText);
 
+        // 1차: 강타입 역직렬화
         try
         {
             var modelOutput = JsonSerializer.Deserialize<AiChatModelOutput>(json, JsonOptions);
@@ -436,13 +439,40 @@ General rules:
         catch (JsonException ex)
         {
             _logger.LogWarning(ex,
-                "Failed to parse structured JSON from model output. Falling back to raw text. Output={Output}",
+                "Structured deserialization failed; trying JsonDocument. Output={Output}",
                 TrimForLog(outputText));
         }
 
+        // 2차: JsonDocument로 reply 필드만 추출 (suggestedCommands 파싱 실패해도 reply는 살림)
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.TryGetProperty("reply", out var replyEl) &&
+                replyEl.ValueKind == JsonValueKind.String)
+            {
+                var replyText = replyEl.GetString();
+                if (!string.IsNullOrWhiteSpace(replyText))
+                {
+                    _logger.LogWarning(
+                        "Used JsonDocument fallback to extract reply. Output={Output}",
+                        TrimForLog(outputText));
+
+                    return new AiChatResponse { Reply = replyText, Success = true };
+                }
+            }
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex,
+                "JsonDocument parse also failed. Output={Output}",
+                TrimForLog(outputText));
+        }
+
+        // 3차: 파싱 완전 실패 → 빈 reply 반환 (스트리밍 delta가 이미 정답을 전달했으므로 덮어쓰지 않음)
+        _logger.LogError("All reply extraction strategies failed. Output={Output}", TrimForLog(outputText));
         return new AiChatResponse
         {
-            Reply = outputText,
+            Reply = string.Empty,
             Success = true
         };
     }

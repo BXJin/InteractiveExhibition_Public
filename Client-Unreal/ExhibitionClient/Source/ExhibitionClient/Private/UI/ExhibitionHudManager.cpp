@@ -3,6 +3,7 @@
 #include "Blueprint/UserWidget.h"
 #include "Engine/GameInstance.h"
 #include "Engine/Texture2D.h"
+#include "HAL/PlatformProcess.h"
 #include "HttpModule.h"
 #include "IImageWrapper.h"
 #include "IImageWrapperModule.h"
@@ -81,7 +82,7 @@ void UExhibitionHudManager::ShowHud()
 
     // 접속 URL 설정 후 뷰포트에 추가
     const FString LocalIp  = GetLocalIpAddress();
-    const FString PanelUrl = FString::Printf(TEXT("http://%s:%d"), *LocalIp, MobilePanelPort);
+    const FString PanelUrl = GetPanelUrl(LocalIp);
 
     HudWidget->SetPanelUrl(PanelUrl);
     HudWidget->SetConnectionCount(ConnectedPanelCount);
@@ -170,7 +171,7 @@ void UExhibitionHudManager::OnChatReply(const FString& ReplyText)
 
 void UExhibitionHudManager::FetchQrCodeAsync()
 {
-    const FString QrUrl = FString::Printf(TEXT("http://127.0.0.1:%d/api/panel/qr.png"), MobilePanelPort);
+    const FString QrUrl = GetQrEndpointUrl(GetLocalIpAddress());
 
     TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = FHttpModule::Get().CreateRequest();
     HttpRequest->SetURL(QrUrl);
@@ -259,4 +260,54 @@ FString UExhibitionHudManager::GetLocalIpAddress()
     }
 
     return Addr->ToString(false);
+}
+
+bool UExhibitionHudManager::IsLocalHttpsAvailable() const
+{
+    TArray<FString> CandidatePaths;
+
+    if (FPaths::IsRelative(LocalHttpsCertificatePath))
+    {
+        CandidatePaths.Add(FPaths::Combine(FPaths::LaunchDir(), LocalHttpsCertificatePath));
+        CandidatePaths.Add(FPaths::Combine(FPlatformProcess::BaseDir(), LocalHttpsCertificatePath));
+        CandidatePaths.Add(FPaths::Combine(FPaths::ProjectDir(), LocalHttpsCertificatePath));
+    }
+    else
+    {
+        CandidatePaths.Add(LocalHttpsCertificatePath);
+    }
+
+    for (const FString& CandidatePath : CandidatePaths)
+    {
+        FString NormalizedPath = FPaths::ConvertRelativePathToFull(CandidatePath);
+        FPaths::CollapseRelativeDirectories(NormalizedPath);
+        FPaths::NormalizeFilename(NormalizedPath);
+
+        if (FPaths::FileExists(NormalizedPath))
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+FString UExhibitionHudManager::GetPanelScheme() const
+{
+    return IsLocalHttpsAvailable() ? TEXT("https") : TEXT("http");
+}
+
+int32 UExhibitionHudManager::GetPanelPort() const
+{
+    return IsLocalHttpsAvailable() ? SecureMobilePanelPort : MobilePanelPort;
+}
+
+FString UExhibitionHudManager::GetPanelUrl(const FString& Host) const
+{
+    return FString::Printf(TEXT("%s://%s:%d"), *GetPanelScheme(), *Host, GetPanelPort());
+}
+
+FString UExhibitionHudManager::GetQrEndpointUrl(const FString& Host) const
+{
+    return FString::Printf(TEXT("%s/api/panel/qr.png"), *GetPanelUrl(Host));
 }

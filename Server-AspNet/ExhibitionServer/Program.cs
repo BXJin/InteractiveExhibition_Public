@@ -6,6 +6,7 @@ using ExhibitionServer.Configuration;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.AddLocalHttpsSettingsIfCertificateExists();
 builder.ConfigureKestrel();
 
 builder.Services.AddControllers();

@@ -7,6 +7,8 @@ export interface MicButtonProps {
   permissionDenied?: boolean;
   onPressStart: () => void;
   onPressEnd: () => void;
+  /** 'sm' = 채팅 폼 인라인용 (36px), 'lg' = 독립 플로팅 버튼용 (64px) */
+  size?: 'sm' | 'lg';
 }
 
 /**
@@ -19,6 +21,7 @@ export const MicButton: React.FC<MicButtonProps> = ({
   permissionDenied = false,
   onPressStart,
   onPressEnd,
+  size = 'sm',
 }) => {
   const handlePointerDown = (e: React.PointerEvent) => {
     e.preventDefault();
@@ -32,16 +35,19 @@ export const MicButton: React.FC<MicButtonProps> = ({
     onPressEnd();
   };
 
+  const isLg = size === 'lg';
+
   return (
     <button
       type="button"
       disabled={disabled}
       onPointerDown={handlePointerDown}
       onPointerUp={handlePointerUp}
-      onPointerLeave={handlePointerUp}   // 버튼 밖으로 나가면 중지
+      onPointerLeave={handlePointerUp}
       onPointerCancel={handlePointerUp}
       className={`
-        h-9 w-9 shrink-0 rounded-lg flex items-center justify-center
+        ${isLg ? 'h-16 w-16 rounded-2xl' : 'h-9 w-9 shrink-0 rounded-lg'}
+        flex flex-col items-center justify-center gap-1
         select-none touch-none transition-colors
         ${permissionDenied
           ? 'bg-red-500/20 text-red-400 border border-red-500/30'
@@ -54,8 +60,13 @@ export const MicButton: React.FC<MicButtonProps> = ({
       title={permissionDenied ? '마이크 권한이 필요합니다' : '누르는 동안 녹음'}
     >
       {permissionDenied
-        ? <MicOff size={14} />
-        : <Mic size={14} />}
+        ? <MicOff size={isLg ? 22 : 14} />
+        : <Mic size={isLg ? 22 : 14} />}
+      {isLg && (
+        <span className="text-[8px] font-mono uppercase tracking-widest opacity-60">
+          {isRecording ? 'Release' : 'Hold'}
+        </span>
+      )}
     </button>
   );
 };

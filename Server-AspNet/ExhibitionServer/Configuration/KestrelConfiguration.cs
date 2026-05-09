@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.Extensions.Configuration;
 
 namespace ExhibitionServer.Configuration;
 
@@ -14,6 +15,21 @@ namespace ExhibitionServer.Configuration;
 /// </summary>
 public static class KestrelConfiguration
 {
+    private const string LocalHttpsSettingsFile = "appsettings.LocalHttps.json";
+    private const string LocalHttpsCertificateFile = "server.pfx";
+
+    public static WebApplicationBuilder AddLocalHttpsSettingsIfCertificateExists(this WebApplicationBuilder builder)
+    {
+        var certificatePath = Path.Combine(builder.Environment.ContentRootPath, LocalHttpsCertificateFile);
+        if (!File.Exists(certificatePath))
+        {
+            return builder;
+        }
+
+        builder.Configuration.AddJsonFile(LocalHttpsSettingsFile, optional: true, reloadOnChange: false);
+        return builder;
+    }
+
     public static WebApplicationBuilder ConfigureKestrel(this WebApplicationBuilder builder)
     {
         // Nagle 알고리즘 비활성화: 작은 패킷을 즉시 전송

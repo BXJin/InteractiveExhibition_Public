@@ -60,6 +60,12 @@ private:
 	/** 로컬 IPv4 주소를 반환합니다. 실패 시 "127.0.0.1"을 반환합니다. */
 	static FString GetLocalIpAddress();
 
+	bool IsLocalHttpsAvailable() const;
+	FString GetPanelScheme() const;
+	int32 GetPanelPort() const;
+	FString GetPanelUrl(const FString& Host) const;
+	FString GetQrEndpointUrl(const FString& Host) const;
+
 private:
 	UPROPERTY(Config)
 	TSoftClassPtr<UExhibitionHudWidget> HudWidgetClass;
@@ -67,6 +73,12 @@ private:
 	/** ASP.NET 서버 포트 (패널 서빙 + QR 엔드포인트 공용) */
 	UPROPERTY(Config)
 	int32 MobilePanelPort = 5225;
+
+	UPROPERTY(Config)
+	int32 SecureMobilePanelPort = 7225;
+
+	UPROPERTY(Config)
+	FString LocalHttpsCertificatePath = TEXT("ExhibitionServer/server.pfx");
 
 	UPROPERTY()
 	UExhibitionHudWidget* HudWidget = nullptr;

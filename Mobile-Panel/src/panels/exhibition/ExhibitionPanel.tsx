@@ -39,7 +39,7 @@ import { streamVoiceChat, notifySpeakingComplete } from './voiceApi';
 const STORAGE_KEY    = 'exhibition_server_url';
 const CHAT_CONVERSATION_KEY = 'exhibition_chat_conversation_id';
 const CHARACTER_ID   = 'Character_01';
-const DEFAULT_URL    = `${window.location.protocol}//${window.location.hostname}:5225`;
+const DEFAULT_URL    = `${window.location.protocol}//${window.location.hostname}:${window.location.port || (window.location.protocol === 'https:' ? 7225 : 5225)}`;
 const THROTTLE_MS    = 80;  // 조이스틱/터치패드 전송 간격
 const FEEDBACK_MS    = 1500; // 버튼 피드백 표시 시간
 
@@ -310,7 +310,9 @@ export const ExhibitionPanel: React.FC = () => {
               item.id === assistantId
                 ? {
                     ...item,
-                    text: response.reply || item.text,
+                    // 스트리밍으로 이미 구성된 텍스트를 우선 사용.
+                    // response.reply는 스트리밍이 비었을 때만 fallback.
+                    text: item.text || response.reply,
                     commandCount: response.suggestedCommands?.length ?? 0,
                     provider: response.provider,
                     model: response.model,
@@ -462,7 +464,7 @@ export const ExhibitionPanel: React.FC = () => {
                       value={urlDraft}
                       onChange={e => setUrlDraft(e.target.value)}
                       onKeyDown={e => e.key === 'Enter' && saveUrl()}
-                      placeholder="http://192.168.x.x:5225"
+                      placeholder="https://192.168.x.x:7225"
                       className="flex-1 bg-white/5 border border-white/8 rounded-xl px-3 py-2.5 text-[12px] font-mono text-white/80 outline-none focus:border-emerald-500/40 transition-colors"
                     />
                     <button onClick={saveUrl} className="px-4 py-2.5 bg-emerald-600 active:bg-emerald-700 rounded-xl text-[11px] font-bold">
@@ -481,6 +483,22 @@ export const ExhibitionPanel: React.FC = () => {
       footer={<>Character_01 · Exhibition Controller</>}
     >
       {/* TouchPad: 메인 영역 전체가 드래그 회전 표면 */}
+      {/* 마이크: 하단 중앙 — 항상 표시, 채팅 패널과 겹치지 않는 위치 */}
+      <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-30">
+        <MicButton
+          size="lg"
+          isRecording={isRecording}
+          disabled={chatBusy || voiceBusy}
+          permissionDenied={permissionDenied}
+          onPressStart={startRecording}
+          onPressEnd={async () => {
+            const blob = await stopRecording();
+            if (blob && blob.size > 0) void submitVoiceChat(blob);
+          }}
+        />
+      </div>
+
+      {/* 채팅: 오른쪽 하단 */}
       <button
         onClick={() => { setChatOpen(v => !v); setSideOpen(false); }}
         className={`absolute bottom-10 right-8 z-30 h-11 w-11 rounded-xl border flex items-center justify-center transition-colors
@@ -533,7 +551,7 @@ export const ExhibitionPanel: React.FC = () => {
                       ? 'ml-8 bg-emerald-500/10 border-emerald-500/15 text-emerald-50'
                       : 'mr-6 bg-white/5 border-white/8 text-white/75'}`}
                 >
-                  <div>{message.text || (message.streaming ? '...' : '')}</div>
+                  <div className="whitespace-pre-wrap">{message.text || (message.streaming ? '...' : '')}</div>
                   {message.role === 'assistant' && (
                     <div className="mt-2 flex flex-wrap gap-1.5 text-[8px] font-mono text-white/25">
                       {message.sources?.map(source => (
@@ -593,16 +611,6 @@ export const ExhibitionPanel: React.FC = () => {
                   maxLength={300}
                   placeholder="전시물이나 분위기를 물어봐"
                   className="min-w-0 flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-[12px] text-white/80 outline-none focus:border-emerald-500/40 disabled:opacity-40"
-                />
-                <MicButton
-                  isRecording={isRecording}
-                  disabled={chatBusy || voiceBusy}
-                  permissionDenied={permissionDenied}
-                  onPressStart={startRecording}
-                  onPressEnd={async () => {
-                    const blob = await stopRecording();
-                    if (blob && blob.size > 0) void submitVoiceChat(blob);
-                  }}
                 />
                 <button
                   type="submit"

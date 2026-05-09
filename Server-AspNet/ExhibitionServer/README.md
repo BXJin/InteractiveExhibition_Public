@@ -9,9 +9,11 @@ AI 채팅 RAG 파이프라인과 음성 채팅(STT→LLM→TTS) 파이프라인�
 ## 실행
 
 ```bash
-dotnet run                          # http://localhost:5225
-dotnet run --launch-profile https   # HTTPS
+dotnet run   # http://0.0.0.0:5225
 ```
+
+**HTTPS 자동 활성화**: 실행 폴더에 `server.pfx`가 존재하면 [`appsettings.LocalHttps.json`](appsettings.LocalHttps.json)을 자동 로드해 HTTPS `7225` 포트도 함께 엽니다.  
+`server.pfx`가 없으면 HTTP만 동작합니다 (itch.io 공개 배포 기본값).
 
 설정: [`appsettings.json`](appsettings.json) — `AiGateway.BaseUrl` 을 Gateway 주소로 변경  
 배포: [`../../scripts/publish-server.bat`](../../scripts/publish-server.bat)
@@ -29,9 +31,12 @@ ExhibitionServer/
 │   ├── Knowledge/          # 전시물 지식베이스 (키워드 검색)
 │   └── Abstractions/       # 인터페이스 정의
 ├── Controllers/            # REST API 엔드포인트
-├── Configuration/          # DI 등록, 미들웨어 파이프라인, Kestrel 설정
+├── Configuration/          # DI 등록, 미들웨어 파이프라인, Kestrel 튜닝
+│                           #   KestrelConfiguration: server.pfx 감지 + 저지연 옵션
 ├── Options/                # appsettings 바인딩 클래스
 ├── Streaming/              # SSE 스트리밍 유틸
+├── appsettings.json        # 기본 설정 (HTTP 5225)
+├── appsettings.LocalHttps.json  # HTTPS 7225 설정 (server.pfx 존재 시 자동 로드)
 └── Data/ExhibitionKnowledge/ # 전시물 JSON 데이터
 ```
 

@@ -2,7 +2,7 @@ namespace Exhibition.Shared.Ai;
 
 public sealed record AiSuggestedCommandDto
 {
-    public required string Type { get; init; }
+    public string Type { get; init; } = string.Empty;
 
     public string? CharacterId { get; init; }
 
